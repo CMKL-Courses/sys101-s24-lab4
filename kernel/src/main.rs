@@ -1,17 +1,13 @@
 #![no_std] // don't link the Rust standard library
 #![no_main] // disable all Rust-level entry points
 
-use bootloader_api::{entry_point, BootInfo, BootloaderConfig};
 use core::fmt::Write;
+use bootloader_api::{entry_point, BootInfo, BootloaderConfig};
 use bootloader_api::info::{FrameBuffer, PixelFormat};
-use kernel::serial;
+use kernel::{HandlerTable, serial};
 use noto_sans_mono_bitmap::{FontWeight, get_raster, RasterHeight, RasterizedChar};
+use pc_keyboard::DecodedKey;
 
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    let _ = writeln!(serial(), "PANIC: {info}");
-    loop {}
-}
 const BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.kernel_stack_size = 100 * 1024; // 100 KiB kernel stack size
@@ -31,7 +27,26 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     writeln!(serial(), "Entering kernel wait loop...").unwrap();
 
-    loop {}
+    HandlerTable::new()
+        .keyboard(key)
+        .timer(tick)
+        .startup(start)
+        .start();
+}
+
+fn start() {
+    writeln!(serial(), "Hello, world!").unwrap();
+}
+
+fn tick() {
+    write!(serial(), ".").unwrap();
+}
+
+fn key(key: DecodedKey) {
+    match key {
+        DecodedKey::Unicode(character) => write!(serial(), "{}", character).unwrap(),
+        DecodedKey::RawKey(key) => write!(serial(), "{:?}", key).unwrap(),
+    }
 }
 
 fn write_rendered_char(buffer:&mut FrameBuffer, x_pos:usize, y_pos:usize, rendered_char: RasterizedChar) -> (usize, usize) {
