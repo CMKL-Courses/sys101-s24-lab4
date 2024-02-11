@@ -1,8 +1,11 @@
+// Original code from rust-osdev/bootloader crate https://github.com/rust-osdev/bootloader
+
 #![no_std]
 #![feature(abi_x86_interrupt)]
 
 mod interrupts;
 
+use core::cell::UnsafeCell;
 use core::panic::PanicInfo;
 use core::fmt::Write;
 use uart_16550::SerialPort;
@@ -105,3 +108,23 @@ fn panic(info: &PanicInfo) -> ! {
     let _ = writeln!(serial(), "PANIC: {info}");
     hlt_loop();
 }
+
+pub struct RacyCell<T>(UnsafeCell<T>);
+
+impl<T> RacyCell<T> {
+    pub const fn new(v: T) -> Self {
+        Self(UnsafeCell::new(v))
+    }
+
+    /// Gets a mutable pointer to the wrapped value.
+    ///
+    /// ## Safety
+    /// Ensure that the access is unique (no active references, mutable or not).
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn get_mut(&self) -> &mut T {
+        unsafe { &mut *self.0.get() }
+    }
+}
+
+unsafe impl<T> Send for RacyCell<T> where T: Send {}
+unsafe impl<T: Sync> Sync for RacyCell<T> {}
