@@ -1,8 +1,12 @@
 #![no_std] // don't link the Rust standard library
 #![no_main] // disable all Rust-level entry points
 
-mod screen;
+extern crate alloc;
 
+mod screen;
+mod allocator;
+
+use alloc::boxed::Box;
 use core::fmt::Write;
 use core::slice;
 use bootloader_api::{entry_point, BootInfo, BootloaderConfig};
@@ -11,7 +15,7 @@ use bootloader_api::info::MemoryRegionKind;
 use kernel::{HandlerTable, serial};
 use pc_keyboard::DecodedKey;
 use x86_64::registers::control::Cr3;
-use x86_64::structures::paging::Size4KiB;
+use x86_64::structures::paging::PageTable;
 use x86_64::VirtAddr;
 use crate::screen::{Writer, screenwriter};
 
@@ -59,13 +63,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // unsafe { asm!("mov {x}, cr3", x = out(reg) cr3); }
     // writeln!(serial(), "CR3 value {:#x}", cr3).unwrap();
 
-    let page = x86_64::structures::paging::Page::<Size4KiB>::from_start_address(VirtAddr::new(cr3)).unwrap();
-    writeln!(Writer, "Page table {:?} {}", page, page.size()).unwrap();
+    let cr3_page = unsafe { slice::from_raw_parts_mut((cr3 + physical_offset) as *mut usize, 6) };
+    writeln!(Writer, "CR3 Page table virtual address {cr3_page:#p}").unwrap();
 
-    let page = unsafe { slice::from_raw_parts_mut((cr3 + physical_offset) as *mut usize, 6) };
-    for x in 0..page.len() {
-        write!(Writer, "{:?} ", page[x] as *const usize).unwrap();
+    let l4_table = unsafe { active_level_4_table(VirtAddr::new(physical_offset)) };
+    writeln!(Writer, "L4 Page table virtual address: {l4_table:#p}").unwrap();
+    for (i, entry) in l4_table.iter().enumerate() {
+        //write!(Writer,"{i} ").unwrap();
+        if !entry.is_unused() {
+            writeln!(Writer, "L4 Entry {}: {:?}", i, entry).unwrap();
+        }
     }
+
+    allocator::init_heap((physical_offset + usable_region.start) as usize);
+    let x = Box::new(42);
+    let y = Box::new(24);
+    writeln!(Writer, "x + y = {}", *x + *y).unwrap();
+    writeln!(Writer, "{x:#p} {:?}", *x).unwrap();
+    writeln!(Writer, "{y:#p} {:?}", *y).unwrap();
 
     writeln!(Writer, "\nEntering kernel wait loop...").unwrap();
     HandlerTable::new()
@@ -75,6 +90,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         .start();
 }
 
+pub unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
+                                   -> &'static mut PageTable
+{
+    let (level_4_table_frame, _) = Cr3::read();
+
+    let phys = level_4_table_frame.start_address();
+    let virt = physical_memory_offset + phys.as_u64();
+    let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
+
+    &mut *page_table_ptr // unsafe
+}
 fn start() {
     writeln!(Writer, "Hello, world!").unwrap();
 }

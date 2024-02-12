@@ -10,6 +10,7 @@ use core::panic::PanicInfo;
 use core::fmt::Write;
 use uart_16550::SerialPort;
 use pc_keyboard::DecodedKey;
+extern crate alloc;
 
 pub fn serial() -> SerialPort {
     let mut port = unsafe { SerialPort::new(0x3F8) };
